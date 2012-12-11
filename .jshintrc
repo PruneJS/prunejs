@@ -1,0 +1,17 @@
+{
+    "globals": {
+        "console": true,
+        "define": true,
+        "require": true,
+        "curl":true
+    },
+
+    "node" : false,
+    "es5" : true,
+    "browser" : true,
+
+    "laxcomma":true,
+    "laxbreak":true,
+    "asi":true,
+    "sub":true
+}
