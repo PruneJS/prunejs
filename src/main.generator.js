@@ -12,7 +12,7 @@ exports.CompressCommandHandler = function(o){
 		renumber: false,
 		hexadecimal: false,
 		quotes: 'auto',
-		escapeless: true,
+		escapeless: false,
 		compact: true,
 		parentheses: false,
 		semicolons: false

@@ -1,7 +1,20 @@
 def default(context):
     # base = context.Node("./")
     build_main(context)
+    minify(context)
 
+
+
+def minify(context):
+    run_command(
+        [
+            'node','./prune.js'
+            ,'-s','./prune.js'
+            ,'-t','./prune.js'
+            # ,'-c', 'minify' # "minify" is default command for prune.js
+        ]
+        , '.'
+    )
 
 def build_main(context):
     base = context.Node("./src/")
@@ -31,6 +44,7 @@ def build_main(context):
 
     file_wrapper = context.Node('./src/template_cjs_lite.js').text
     context.Node('./prune.js').text = file_wrapper % "\n\n".join(body)
+
 
 
 def get_escodegen(context):
@@ -132,3 +146,11 @@ def generate_body(context, base, modules):
     # file_wrapper = context.Node('./src/template_cjs_lite.js').text
     # context.Node('./libs/escodegen.js').text = file_wrapper % "\n\n".join(body)
     return "\n\n".join(body)
+
+import subprocess
+def run_command(command, working_dir):
+    subprocess.call(
+        command
+        , shell=True
+        , cwd=working_dir
+    )
