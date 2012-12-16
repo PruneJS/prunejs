@@ -250,6 +250,23 @@ var supported_plugins = {
 			, 'utf8'
 		)
 	}
+	, 'css': function CSSPluginWrapper(buffer, module, meta) {
+
+		var pjscssdefine = ";define('prunejs/plugins/css', function(){return function(cssbody){"+
+		"var ss = 'styleSheet', ac = 'appendChild', styletag = document.createElement('style'); styletag.type = 'text/css';"+
+		"if (styletag[ss]) {styletag[ss].cssText = cssbody} else {styletag[ac](document.createTextNode(cssbody))};"+
+		"document.getElementsByTagName('head')[0][ac](styletag)}});\n"
+
+		return new Buffer(
+			( meta.modules['prunejs/plugins/css'] ? '' : pjscssdefine) +
+			";(function() {var doneit = false, css = unescape(\n'" +
+			escape(
+				buffer.toString(/*binary string. no encoding*/)
+			).split("'").join("\\'") +
+			"'\n);define(['prunejs/plugins/css'], function(cssplugin){" +
+			'if (!doneit) { cssplugin(css); doneit = true } })})();'
+		)
+	}
 }
 
 /**
@@ -329,7 +346,7 @@ function processAMDResourceReference(r, rootrelativedir, meta){
 			// plugins transform resources so the "source" is not what's in the file.
 			r.amdReference.plugins.forEach(function(plugin){
 				if (supported_plugins[plugin]) {
-					module_source = supported_plugins[plugin](module_source)
+					module_source = supported_plugins[plugin](module_source, module, meta)
 				} else {
 					throw new Error(
 						"AMD plugin '"+plugin+"'' is not on the list ('"+
