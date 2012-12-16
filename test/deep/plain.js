@@ -1,0 +1,1 @@
+var mytestvar = "String from plain JavaScript file."
