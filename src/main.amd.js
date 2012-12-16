@@ -42,7 +42,6 @@ We pull that apart and return an object with properties describing the path.
 }
 
 @function
-@public
 @param {String} uri A string describing a dependency of a typical AMD resource.
 @returns {Object} With properties describing the uri's nature.
 */
@@ -93,11 +92,10 @@ Relative resources are those that:
 - plugin prefixes are ignored (removed) before inspection for relative resource
 
 @function
-@public
 @param {Object} e Element as object {'node': ASTNode, 'parent': object like this but for node's parent}
 @returns {Array} Where each element is an object describing the argument, inluding ref to AST node
 */
-function getRequredResources(element){
+function getRequiredAMDResources(element){
 
 	// element
 	// {
@@ -105,28 +103,28 @@ function getRequredResources(element){
 	// 	'parent': { same as this but for parent AST Node }
 	// }
 
-    var answer = []
-    , a = 'arguments'
-    , e = 'elements'
+	var answer = []
+	, a = 'arguments'
+	, e = 'elements'
 
-    // e.node = {
-    // 	...
-    // 	arguments: [
-    // 		// first arg in require is always array of dependencies
-    // 		{
-    // 			...
-    // 			elements: [
-    // 				{ argument element object }
-    // 				...
-    // 			]
-    // 			...
-    // 		}
-    // 		...
-    // 	]
-    // 	...
-    // }
+	// e.node = {
+	// 	...
+	// 	arguments: [
+	// 		// first arg in require is always array of dependencies
+	// 		{
+	// 			...
+	// 			elements: [
+	// 				{ argument element object }
+	// 				...
+	// 			]
+	// 			...
+	// 		}
+	// 		...
+	// 	]
+	// 	...
+	// }
 
-    var args = ( element.node[a] && element.node[a].length ) ?
+	var args = ( element.node[a] && element.node[a].length ) ?
 		element.node[a] :
 		[undefined, undefined, undefined]
 
@@ -140,7 +138,7 @@ function getRequredResources(element){
 			[]
 		)
 
-	// console.log('getRequredResources: found ', dependents.length, " in 0, 1: ", args[0], args[1])
+	// console.log('getRequiredAMDResources: found ', dependents.length, " in 0, 1: ", args[0], args[1])
 
 	dependents.forEach(function(arg){
 		if (arg.type === 'Literal' && typeof arg.value === 'string') {
@@ -156,8 +154,64 @@ function getRequredResources(element){
 		}
 	})
 
-    return answer
+	return answer
 }
+
+/**
+Extracts CallExpression Element arguments that point to relative resources.
+
+Relative resources are those that:
+- resource uri starts with "../" or "./"
+- their file system path is not outside of working dir
+- plugin prefixes are ignored (removed) before inspection for relative resource
+
+@function
+@param {Object} e Element as object {'node': ASTNode, 'parent': object like this but for node's parent}
+@returns {Array} Where each element is an object describing the argument, inluding ref to AST node
+*/
+function getRequiredCJSResources(element){
+
+	// element
+	// {
+	// 	'node': AST node
+	// 	'parent': { same as this but for parent AST Node }
+	// }
+
+	// e.node = {
+	// 	...
+	// 	arguments: [
+	// 		// first arg in require is always array of dependencies
+	// 		{
+	// 			...
+	// 			elements: [
+	// 				{ argument element object }
+	// 				...
+	// 			]
+	// 			...
+	// 		}
+	// 		...
+	// 	]
+	// 	...
+	// }
+
+	var a = 'arguments'
+	var arg = element.node[a] && element.node[a].length && element.node[a][0] || undefined
+
+	var resource
+	if (arg && arg.type === 'Literal' && typeof arg.value === 'string') {
+		resource = parseAMDResourceURI(arg.value)
+
+		// let's not bother with absolute refs. We assume they are absolute for a reason.
+		if (!resource.absolute) {
+			return [{
+				'node': arg
+				, 'amdReference': resource
+			}]
+		}
+	}
+	return []
+}
+
 
 function getDefineName(definecallelement){
 	var args = definecallelement.node['arguments']
@@ -270,19 +324,25 @@ var supported_plugins = {
 }
 
 /**
-Reviews the AST tree node that is some AMD-style dependency declaration resource
+Reviews the AST tree node that is some AMD/CJS-style dependency declaration resource
 and tries to resolve it to a module.
-
-In a define call as such:
-	define("name", ['required1','./required2'], callback)
-require1 and require2 are these AMD dependency declaration resources.
 
 We pull in the file behind the resource (if found) and investigate the module for its
 dependencies recursively until all dependencies are discovered, analysed and folded
 into "meta.modules" inventory.
 
+There is a difference in how relative resources are resolved between AMD and CJS style
+require calls. AMD's require resolves these to global root
+also known as "baseUrl" settings value in Require.js, Curl.js. CJS require resolves these
+aginst the current folder (folder where the parsed file is located)
+
+Since CJS spec does not have AMD define() calls, we don't care about that case. However, in case of
+define() calls, all relative paths are resolved like they are in CJS - relative to local folder.
+
+Because define() based resources are resolved like CJS's require() resources, calling
+function may/should pass in "cjs" for resolution of the resource as resourcetype argument value.
+
 @function
-@public
 @param {Object} r AMD resource description and AST tree pointer.
 	{
 		'node': arg AST node
@@ -291,9 +351,10 @@ into "meta.modules" inventory.
 @param {String} rootrelativedir A string referring to "current" point in module tree navigation.
 	All relative module names are resolved against it.
 @param {Object} meta A hive of data describing all modules. A parsing state of sorts.
+@param {String} resourceResolutionType A string indicating the type of resource resolution ('cjs', 'amd')
 @returns {Type}
 */
-function processAMDResourceReference(r, rootrelativedir, meta){
+function processResourceReference(r, rootrelativedir, meta, resourceResolutionType){
 	'use strict'
 	// what we get - r - is an object like:
 	// {
@@ -301,7 +362,16 @@ function processAMDResourceReference(r, rootrelativedir, meta){
 	// 	, 'amdReference': {'relative':true/false, 'plugins':[], 'resource': 'some/path'}
 	// }
 
-	var deppath = r.amdReference.relative ?
+	// we are not supporting path aliasing or package name aliasing.
+	// when we do, that logic would be right here.
+
+	// AMD-style global require resolves relative resources against baseUrl
+	// in other words, it's not resolved against the module path in which it is called.
+	// "local" AMD require calls and define() required resources are resolved
+	// relative to the module's ID - same as in CommonJS
+	// These differences are communicated to us by calling code as string
+	// indicating the type of the module ID resolution logic: 'amd' or 'cjs'
+	var deppath = r.amdReference.relative && resourceResolutionType === 'cjs' ?
 		path.resolve(meta.root, rootrelativedir, r.amdReference.resource) :
 		path.resolve(meta.root, r.amdReference.resource)
 
@@ -379,6 +449,7 @@ function processAMDResourceReference(r, rootrelativedir, meta){
 	return module
 }
 
+
 function renameModule(module, newname, meta){
 	if (meta.modules[newname]) {
 		console.log(
@@ -390,6 +461,47 @@ function renameModule(module, newname, meta){
 	module.name = newname
 	meta.modules[newname] = module
 	meta.modules[oldname] = new ModuleAlias(module, oldname)
+}
+
+/**
+Determines what type of require call it is. AMD and CommonJS require calls have
+different patterns.
+
+All we look at is the type of the firts argument. If it's string literal, it's CJS,
+else it's AMD.
+
+@function
+@param {Object} e Element as object {'node': ASTNode, 'parent': object like this but for node's parent}
+@returns {Array} Where each element is an object describing the argument, inluding ref to AST node
+*/
+function inferRequireType(element){
+
+	// element
+	// {
+	// 	'node': AST node
+	// 	'parent': { same as this but for parent AST Node }
+	// }
+
+	// e.node = {
+	// 	...
+	// 	arguments: [
+	// 		{'type': ..., etc ... }
+	// 		...
+	// 	]
+	// 	...
+	// }
+
+	// if first arg in require call is a string literal (not an Array or pointer to one)
+	// it must be CommonJS-style call.
+	var a = 'arguments'
+	if (
+		element.node[a] && element.node[a].length &&
+		element.node[a][0].type === 'Literal'
+	) {
+		return 'cjs'
+	} else {
+		return 'amd'
+	}
 }
 
 function resolveDependencies(module, meta){
@@ -471,11 +583,11 @@ function resolveDependencies(module, meta){
 
 	// When there is one anonymous define, the module object named after it gets the AST tree.
 	// When there are no anonymous defines, last named define or the one named after file name gets the AST tree.
-	// The rest of the defines get ModuleAlias shell. It's a "pointer" to 
+	// The rest of the defines get ModuleAlias shell. It's a "pointer" to
 	// full-featured module definition, but it makes explicit that we don't need
 	// to concatenate AST tree for this define as it's already part of some other
 	// module object.
-	// However, these module aliases are treated like normal modules for 
+	// However, these module aliases are treated like normal modules for
 	// dependency resolution later.
 
 
@@ -553,9 +665,9 @@ function resolveDependencies(module, meta){
 	definecalls.forEach(function(e){
 		'use strict'
 
-		getRequredResources(e).forEach(function(r){
+		getRequiredAMDResources(e).forEach(function(r){
 			try {
-				var submodule = processAMDResourceReference(r, rootrelativedir, meta)
+				var submodule = processResourceReference(r, rootrelativedir, meta, 'cjs')
 
 				// noting to the parent module object that we are referenced
 				// in that parent module. `r` is the AST node for the Argument object
@@ -572,27 +684,53 @@ function resolveDependencies(module, meta){
 		})
 	})
 
-	// and pull in the modules referenced in those require() calls:
+	// and pull in the modules referenced in require() calls:
 	requirecalls.forEach(function(e){
 		'use strict'
 		// console.log('require call:')
-		getRequredResources(e).forEach(function(r){
-			try {
-				var submodule = processAMDResourceReference(r, rootrelativedir, meta)
 
-				// noting to the parent module object that we are referenced
-				// in that parent module. `r` is the AST node for the Argument object
-				// wrapper element.
-				module.references.push({'element': r, 'module': submodule})
-			} catch (ex) {
-				console.log(
-					"!! Warning !! Error processing AMD Resource '" +
-					( r.amdReference.plugins.length ? r.amdReference.plugins.join('!') + '!' : '' ) +
-					r.amdReference.resource + "' as referenced in file '"+module.path.fs.name +
-					"'. Error was: ", ex
-				)
-			}
-		})
+		var requireType = inferRequireType(e)
+		if (requireType === 'amd') {
+			getRequiredAMDResources(e).forEach(function(r){
+				try {
+					var submodule = processResourceReference(r, rootrelativedir, meta, requireType)
+
+					// noting to the parent module object that we are referenced
+					// in that parent module. `r` is the AST node for the Argument object
+					// wrapper element.
+					module.references.push({'element': r, 'module': submodule})
+				} catch (ex) {
+					console.log(
+						"!! Warning !! Error processing AMD Resource '" +
+						( r.amdReference.plugins.length ? r.amdReference.plugins.join('!') + '!' : '' ) +
+						r.amdReference.resource + "' as referenced in file '"+module.path.fs.name +
+						"'. Error was: ", ex
+					)
+				}
+			})
+		} else if (requireType === 'cjs') {
+			// let's only support one requred resource per call. I know CJS require() supports
+			// merging props for calls like require('a','b','c') into one object,
+			// but I find the practice crazy, as property names can clobber each other
+			// It is outright nuts for cases where module.exports is a ref to a callable
+			// Thus, we explicitly ignore all but first arg
+			getRequiredCJSResources(e).forEach(function(r){
+				try {
+					var submodule = processResourceReference(r, rootrelativedir, meta, requireType)
+					// noting to the parent module object that we are referenced
+					// in that parent module. `r` is the AST node for the Argument object
+					// wrapper element.
+					module.references.push({'element': r, 'module': submodule})
+				} catch (ex) {
+					console.log(
+						"!! Warning !! Error processing AMD Resource '" +
+						( r.amdReference.plugins.length ? r.amdReference.plugins.join('!') + '!' : '' ) +
+						r.amdReference.resource + "' as referenced in file '"+module.path.fs.name +
+						"'. Error was: ", ex
+					)
+				}
+			})
+		}
 	})
 
 
@@ -688,10 +826,10 @@ exports.InlineDependenciesCommandHandler = function(o){
 
 			var refs = module.references ? module.references : []
 			refs.forEach(function(ref){
-				// console.log("ref: ", ref.element)				
+				// console.log("ref: ", ref.element)
 				ref.element.node.value = ref.module.name
 				ref.element.node.raw = '"' + ref.module.name + '"'
-			}) 
+			})
 
 			graph.push(new toposort.Relationship(
 				module //.name
@@ -701,8 +839,8 @@ exports.InlineDependenciesCommandHandler = function(o){
 						return ref.module //.name
 					})
 					// because aliases are "empty" objects (have no AST tree of their own)
-					// and rely on the linked-to module for its AST tree, we need to insure 
-					// module containing the body for this alias loads before us. 
+					// and rely on the linked-to module for its AST tree, we need to insure
+					// module containing the body for this alias loads before us.
 					// in reality, because we don't have any AST tree there will not be
 					// a "before us" as there is no "us", but effectively this means
 					// "in place of us, but without duplication."
@@ -712,7 +850,7 @@ exports.InlineDependenciesCommandHandler = function(o){
 					}
 					return links
 				})(module)
-			))	
+			))
 		}
 	}
 
