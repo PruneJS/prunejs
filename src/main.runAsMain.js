@@ -24,7 +24,7 @@ exports.runAsMain = function(){
 
 	var commands = (function(options){
 		var s = "-c", l = "--commands"
-		, commands = options[s] ? options[s] : (options[l] ? options[l] : 'minify')
+		, commands = options[s] ? options[s] : (options[l] ? options[l] : ['minify','amd'] )
 
 		if (!Array.isArray(commands)) {
 			commands = [commands]
