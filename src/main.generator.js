@@ -26,35 +26,7 @@ exports.CompressCommandHandler = function(o){
 	o.flags.generator.lastaction = 'compress'
 	o.flags.generator.lastsettings = settings
 
-	fs.writeFileSync(o.target, js, 'utf8')
-
-	return o
-}
-
-exports.PrettyPrintCommandHandler = function(o){
-	var settings = {
-		format: {
-			indent: {
-				style: '    ',
-				base: 0
-			},
-			json: false,
-			renumber: false,
-			hexadecimal: false,
-			quotes: 'auto',
-			escapeless: false,
-			compact: false,
-			parentheses: false,
-			semicolons: false
-		}
-	}
-	, js = escodegen.generate( o.asttree, settings )
-
-	if (!o.flags.generator) {
-		o.flags.generator = {}
-	}
-	o.flags.generator.lastaction = 'prettyprint'
-	o.flags.generator.lastsettings = settings
+	console.log("Writing file ", o.target)
 
 	fs.writeFileSync(o.target, js, 'utf8')
 
@@ -85,6 +57,8 @@ exports.PrettyPrintCommandHandler = function(o){
 	}
 	o.flags.generator.lastaction = 'prettyprint'
 	o.flags.generator.lastsettings = settings
+
+	console.log("Writing file ", o.target)
 
 	fs.writeFileSync(o.target, js, 'utf8')
 

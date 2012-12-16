@@ -246,7 +246,7 @@ var supported_plugins = {
 	}
 	, 'js': function JSPluginWrapper(buffer) {
 		return new Buffer(
-			buffer.toString('utf8') + "define(function(){});"
+			buffer.toString('utf8') + ";\ndefine(function(){});"
 			, 'utf8'
 		)
 	}
@@ -625,7 +625,11 @@ exports.InlineDependenciesCommandHandler = function(o){
 	}
 
 	if (!meta.modules) {
-		meta.modules = {}
+		meta.modules = {
+			'require': new Module('require', meta)
+			, 'module': new Module('module', meta)
+			, 'exports': new Module('exports', meta)
+		}
 	}
 	if (!meta.modules[mainmodule.name]) {
 		meta.modules[mainmodule.name] = mainmodule
