@@ -198,7 +198,7 @@ function setDefineName(definecallelement, name){
 
 function Module(filename, meta, preventExtensionChop){
 	var undefined
-	, name = path.relative(meta.root, filename).replace(path.sep, '/')
+	, name = path.relative(meta.root, filename).split(path.sep).join('/')
 
 	if (!preventExtensionChop && name.match(/\.js$/)) {
 		name = name.substring(0,name.length-3)
@@ -240,7 +240,7 @@ var supported_plugins = {
 			"define(function(){return unescape(\n'" +
 			escape(
 				buffer.toString(/*binary string. no encoding*/)
-			).replace("'","\\'") +
+			).split("'").join("\\'") +
 			"'\n)});"
 		)
 	}
@@ -351,7 +351,7 @@ function processAMDResourceReference(r, rootrelativedir, meta){
 			module_source
 			, {
 				'loc':{
-					'source':path.relative(meta.root, module.path.fs.name).replace(path.sep, '/')
+					'source':path.relative(meta.root, module.path.fs.name).split(path.sep).join('/')
 				}
 			}
 		)
