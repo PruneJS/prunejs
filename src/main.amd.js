@@ -513,7 +513,7 @@ function resolveDependencies(module, meta){
 
 	var definecalls = asttools.findAll(
 		module.asttree
-		, [
+		, [/* this is "OR" array*/[/* this is one and only "AND" array*/
 			// first test
 			{'node':{
 				"type": "CallExpression"
@@ -526,13 +526,13 @@ function resolveDependencies(module, meta){
 				}
 			}}
 			// all must pass
-		]
+		]]
 	)
 
 	// find require resources
 	var requirecalls = asttools.findAll(
 		module.asttree
-		, [
+		, [/* this is "OR" array*/[/* this is one and only "AND" array*/
 			// first test
 			{'node':{
 				"type": "CallExpression"
@@ -545,7 +545,7 @@ function resolveDependencies(module, meta){
 				}
 			}}
 			// all must pass
-		]
+		]]
 	)
 
 	var results_log = []

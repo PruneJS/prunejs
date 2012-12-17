@@ -136,20 +136,51 @@ This function is designed to be bound so that first 2 arguments
 - `conditions` and `callback` - are preset and the bound fn is
 passed to the traverse() function, where it gets only `element` argument passed.
 
+`conditions` is an array of arrays of objects. Outter array is logical "OR" list of
+conditions. Inner arrays are logical "AND" conditions.
+
+For a given "OR" element all objects in the contained "AND" array must match the element
+for us to signal a match.
+
+Example `conditions` array:
+[
+  [
+    {'type':'MyType'}
+    , // AND
+    {'arguments':{'type':'Array'}}
+  ]
+  , // OR
+  [
+    {'type':'MyType'}
+    , // AND
+    {'arguments':{'type':'Object'}}
+  ]
+]
+
 @function
-@param {Array} conditions An array of objects describing what the object must look like to be selected.
+@param {Array} conditions An array of arrays of objects describing what the object must look like to be selected.
 @param {Function} callback Fn to call when conditions are met for a given AST node.
 @param {Object} element a {node: AST Node element, parent: similar element but for parent node} object
 @returns {Boolean} true for "continue to dig deeper" and false for "no need to look deeper, next node please"
 */
 function findAllWorker(conditions, callback, element){
 
-  if (conditions.every(function(condition){
-      return isSubsetOf(condition, element)
-    })
-  ) {
-    callback(element)
-  }
+  // [].every() loops over each element until end of array or handler returns false
+  // Our outter loop ABUSES that to cut the loop short when first condition group among "OR"
+  // is matched to the element. (We return 'false' as an indicator of 'stop looping')
+  // Our inner loop actually relies on proper functionality of .every() and relies on
+  // return value to figure out if all "AND" conditions vere matched.
+  conditions.every(function(andconditions){
+    if (andconditions.every(function(condition){
+        return isSubsetOf(condition, element)
+      })
+    ) {
+      callback(element)
+      return false
+    }
+    return true
+  })
+
   return true // means "traverser, please continue digging"
 }
 
