@@ -1,26 +1,11 @@
 var fs = global.require('fs')
+var path = global.require('path')
+
 
 exports.runAsMain = function(){
 	'use strict'
 
 	var command_line_optins = require('argsparser').parse()
-
-	var options = (function(options){
-		var undefined
-		, s = "-o"
-		, l = "--options_file"
-		, options_file_name = options[s] ? options[s] : (options[l] ? options[l] : undefined)
-
-		if (fs.existsSync(options_file_name)) {
-			try {
-				return JSON.parse(fs.readFileSync(options_file_name, 'utf8'))
-			} catch (ex) {
-				console.log('Unable to read options from options file ' + options_file_name )
-				//throw ex
-			}
-		}
-		return {}
-	})(command_line_optins)
 
 	var commands = (function(options){
 		var s = "-c", l = "--commands"
@@ -55,13 +40,31 @@ exports.runAsMain = function(){
 	})(command_line_optins)
 
 	var source_files = (function(options){
-		var s = "-s", l = "--source"
-		return [ options[s] ? options[s] : (options[l] ? options[l] : 'main.js') ]
+		// if command was "node prune.js path/to/main/module.js"
+		if (typeof options.node === 'object' && options.node[1]) {
+			return [ options.node[1] ]
+		} else {
+			return [ 'main.js' ]
+		}
 	})(command_line_optins)
 
 	var target_file = (function(options){
 		var s = "-t", l = "--target"
-		return options[s] ? options[s] : (options[l] ? options[l] : 'main.min.js')
+		return options[s] ? 
+			options[s] : (
+				options[l] ? 
+				options[l] : 
+				(function(s){
+					var ep = s.lastIndexOf('.')
+					, sp = s.split(path.sep).join('/').lastIndexOf('/')
+
+					if (ep !== -1 && ep > sp) {
+						return s.substr(0,ep) + '.min' + s.substr(ep)
+					} else {
+						return s + '.min.js'
+					}
+				})(source_files[0])
+			)
 	})(command_line_optins)
 
 	var processor = require('main.processor')

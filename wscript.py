@@ -9,7 +9,7 @@ def minify(context):
     run_command(
         [
             'node','./prune.js'
-            ,'-s','./prune.js'
+            ,'./prune.js'
             ,'-t','./prune.js'
             ,'-c', 'minify' # "minify" is default command for prune.js
         ]
