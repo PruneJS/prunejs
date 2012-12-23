@@ -63,7 +63,7 @@ Here is how you communicate 1, 2, 3 and 4 to Prune.js:
 
 	# Make the "root" folder your Current Working Dir
 	cd ~/projects/myapp/checkout
-	# run Prune.js, specifying the source, target
+	# run Prune.js, assuming your main source file is ./main.js
 	node ~/bin/prune.js
 	# if your main module is not './main.js', run while specifying the source
 	node ~/bin/prune.js js/app/main.js
