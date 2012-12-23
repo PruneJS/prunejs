@@ -1,16 +1,26 @@
 // when wrapped, real require is on global.
 var fs = global.require ? global.require('fs') : require('fs')
 var path = global.require ? global.require('path') : require('path')
-var esprima, asttools, toposort
+var esprima, asttools, toposort, escodegen
 try {
 	// this is for used when wrapped
 	asttools = require('main.asttools')
 	esprima = require('esprima')
+	escodegen = require('escodegen')
 	toposort = require('main.toposort')
 } catch (ex) {
 	asttools = require('./main.asttools')
 	esprima = require('./libs/esprima')
+	escodegen = require('./libs/escodegen')
 	toposort = require('./main.toposort')
+}
+
+// http://stackoverflow.com/a/2548133/366864
+function endsWith(str, suffix) {
+    return str.indexOf(suffix, str.length - suffix.length) !== -1;
+}
+function startsWith(str, prefix) {
+    return str.indexOf(prefix) === 0;
 }
 
 var absolute_uri_pattern = (/^(http:|https:)?\/\//)
@@ -252,7 +262,10 @@ function setDefineName(definecallelement, name){
 
 function Module(filename, meta, preventExtensionChop){
 	var undefined
-	, name = path.relative(meta.root, filename).split(path.sep).join('/')
+	, name = path.relative(
+		path.join( meta.config.root, meta.config.baseUrl )
+		, filename
+	).split(path.sep).join('/')
 
 	if (!preventExtensionChop && name.match(/\.js$/)) {
 		name = name.substring(0,name.length-3)
@@ -371,9 +384,33 @@ function processResourceReference(r, rootrelativedir, meta, resourceResolutionTy
 	// relative to the module's ID - same as in CommonJS
 	// These differences are communicated to us by calling code as string
 	// indicating the type of the module ID resolution logic: 'amd' or 'cjs'
-	var deppath = r.amdReference.relative && resourceResolutionType === 'cjs' ?
-		path.resolve(meta.root, rootrelativedir, r.amdReference.resource) :
-		path.resolve(meta.root, r.amdReference.resource)
+	var depname = (r.amdReference.relative && resourceResolutionType === 'cjs') ?
+		path.join(rootrelativedir, r.amdReference.resource).split(path.sep).join('/') :
+		r.amdReference.resource
+
+	Object.keys(meta.config.paths).every(function(fragment){
+		// if start of depname matches fragment, it may be a case of:
+		// startsWith("applicationName/qwer", 'app')
+		// which does not feel like the case where we would do replacement for the
+		// starting fragment "app" Hence the check if '/' follows the fragment
+		// in the dep name. Example: 'app/module', where 'app' is replaced by
+		// '/longer/path/to/my/app_v12.023'
+		if (
+			depname == fragment ||
+			( startsWith(depname, fragment) && (
+					endsWith(fragment, '/') ||
+					( depname[fragment.length] === '/' )
+				)
+			)
+		) {
+			depname = meta.config.paths[fragment] + depname.slice(fragment.length)
+			// this breaks the [].every() loop
+			return false
+		}
+		return true // this continues the loop
+	})
+
+	var deppath = path.resolve(meta.config.root, meta.config.baseUrl, depname)
 
 	// plugins usually get full path, including .js ext
 	// but modules are listed sans ".js" extension
@@ -438,7 +475,7 @@ function processResourceReference(r, rootrelativedir, meta, resourceResolutionTy
 			module_source
 			, {
 				'loc':{
-					'source':path.relative(meta.root, module.path.fs.name).split(path.sep).join('/')
+					'source':path.relative(meta.config.root, module.path.fs.name).split(path.sep).join('/')
 				}
 			}
 		)
@@ -509,7 +546,10 @@ function resolveDependencies(module, meta){
 	console.log('Resolving dependencies for module ' + module.path.fs.name )
 
 	// root-relative dir is one where currently-inspected module resides
-	var rootrelativedir = path.normalize( path.relative(root, module.path.fs.dir) + path.sep )
+	var rootrelativedir = path.normalize( path.relative(
+			path.join( meta.config.root, meta.config.baseUrl )
+			, module.path.fs.dir
+		) + path.sep )
 
 	var definecalls = asttools.findAll(
 		module.asttree
@@ -732,10 +772,167 @@ function resolveDependencies(module, meta){
 			})
 		}
 	})
-
-
 }
 
+function getAMDConfigFromASTTree(asttree){
+
+	var undef
+
+	// let's see if we can find 'paths' and 'baseUrl' values inside the file.
+	// a = (/(?:<script[^>]*?>)([\s\S]+?baseUrl[\s\S]+?)(?=<\/script>)/)
+	// we require that both are present in a configuration object for us
+	// to accept it as a valid AMD loader config object
+	var AMDLoaderConfigurationObjectMarker = 'AMDLoaderConfiguration'
+	var baseUrl_config_node = asttools.findAll(
+		asttree
+		, [/* "OR" array */
+			[/* "AND" array */
+				{'node':{
+					"type": "Property"
+	                , "key": {
+	                    "type": "Identifier"
+	                    , "name": AMDLoaderConfigurationObjectMarker
+	                }
+				}}
+				, // AND
+				{'parent':{'parent':{'node':{
+					"type": "ObjectExpression"
+				}}}}
+			]
+			, // OR
+			[/* "AND" array */
+				{'node':{
+					"type": "Property"
+					, "key": {
+					    "type": "Literal"
+					    , "value": AMDLoaderConfigurationObjectMarker
+					}
+				}}
+				, // AND
+				{'parent':{'parent':{'node':{
+					"type": "ObjectExpression"
+				}}}}
+			]
+		]
+	)
+
+	var tmp = baseUrl_config_node[0] ? baseUrl_config_node[0].parent.parent.node : undef
+
+	var AMDConfig = tmp ?
+		(new Function( 'return ' + escodegen.generate(
+			tmp
+		) ))() :
+		undef
+
+	return AMDConfig
+}
+
+
+
+function getAMDConfigFromFile(f){
+
+	var rr = (/<script[^>]*>([\s\S]+?)<\/script>/)
+	var r = (/AMDLoaderConfiguration/)
+
+	var fc = fs.readFileSync(f,'utf8')
+	var AMDConfig
+	var asttree
+
+	// if the marker string is there
+	if (fc.match(r)) {
+
+		var jssource
+		// we extract just the JavaScript section from non-.js files
+		if (endsWith(f,'.js')) {
+			jssource = fc
+		} else {
+			console.log('Looking at file for config', f )
+			// it's a bit nutty to extact needed script with specific content inside
+			// what we do instead is extract contents of each script
+			// and look inside.
+			var m = fc.match(rr)
+			var undef
+			while (m){
+				if (m[1] && m[1].match(r)) {
+					console.log('Found script fragment', m[1] )
+					jssource = m[1]
+					m = undef
+				} else {
+					console.log('Discarding fragment', m[1] )
+				    fc = fc.substr( m.index + m[0].length )
+				    m = fc.match(rr)
+				}
+			}
+		}
+
+		try {
+			if (jssource) {
+				asttree = esprima.parse(jssource)
+				if (asttree) {
+					AMDConfig = getAMDConfigFromASTTree(asttree)
+					if (AMDConfig) {
+						// this breaks the loop in [].every()
+						return AMDConfig
+					}
+				}
+			}
+
+		} catch (ex) {
+			console.log('Error parsing javascript fragment from ', f, ex)
+		}
+	}
+}
+
+function getAMDConfiguration(o){
+
+	var root = o.flags.amd.config.root
+	// let's assume this is "root" of the page and look around here for AMD loader config.
+
+	// Before we go scanning the files in the folder, let's see if
+	// it's inside the main module:
+	var tmp = {
+		AMDConfig: getAMDConfigFromASTTree(o.asttree)
+	}
+
+	if (!tmp.AMDConfig) {
+		// Ok... Let's look inside the root folder.
+		// We understand how to scan .html and .js files.
+		var second_choice_files = []
+		var preferred_files = ["index.html", "index.htm", "default.htm", "default.html", "default.aspx", "index.aspx", "default.php"]
+		var config_contenders = []
+
+		fs.readdirSync(root).every(function(filename){
+			var f = path.join(root, filename)
+			if (fs.statSync(f).isFile()) {
+				if (preferred_files.indexOf(filename.toLowerCase()) === -1) {
+					second_choice_files.push(f)
+				} else if ( (tmp.AMDConfig = getAMDConfigFromFile(f)) ) {
+					// 'false' breaks the [].every() looping
+					return false
+				}
+			}
+			return true
+		})
+
+		if (!tmp.AMDConfig) {
+			second_choice_files.every(function(f){
+				if ( (tmp.AMDConfig = getAMDConfigFromFile(f)) ) {
+					// 'false' breaks the [].every() looping
+					return false
+				}
+				return true
+			})
+		}
+	}
+
+	console.log('AMD config object search results: ', tmp.AMDConfig)
+
+	// by convention let's say we always treat CWD (current working dir)
+	// as the root of the AMD module name space.
+	// In other words, file system's './' is our AMD module name space root.
+
+	return tmp.AMDConfig // can still be undefined at this stage.
+}
 
 /**
 Navigates the require() and define() dependency tree,
@@ -744,6 +941,8 @@ pulling in AST trees for the dependency files
 All inlined resources become named defines.
 */
 exports.InlineDependenciesCommandHandler = function(o){
+
+	var undef
 
 	// while we navigate the dependency tree
 	// we need to be aware of the "starting location"
@@ -760,19 +959,60 @@ exports.InlineDependenciesCommandHandler = function(o){
 	}
 	var meta = o.flags.amd
 
-	// by convention let's say we always treat CWD (current working dir)
-	// as the root of the AMD module name space.
-	// In other words, file system's './' is our AMD module name space root.
-	if (!meta.root) {
-		meta.root = path.normalize( path.resolve("./") + path.sep )
+	if (!meta.config) {
+		meta.config = {}
 	}
 
-	// // module dependencies directed acyclical graph, aka topological sort input
-	// if (!meta.dag) {
-	// 	meta.dag = {}
-	// }
+	// we do allow users to specify the baseUrl explicitly
+	// through o.flags.amd, over --baseUrl command-line option
+	// or by running the build from the folder they consider baseUrl
+	meta.config.root = path.normalize( path.resolve(
+			meta.config.root || (o.options && o.options['--root']) || './'
+		) + path.sep )
 
-	var mainmodule = new Module(path.normalize( path.resolve("./", o.source) ), meta)
+	var mainmodulepath = path.normalize( path.resolve("./", o.source) )
+	var baseUrl = path.relative(
+			meta.config.root
+			, path.resolve('./',
+				meta.config.baseUrl ||
+				(o.options && o.options['--baseUrl']) ||
+				mainmodulepath
+			)
+		)
+
+	if (baseUrl && !endsWith(baseUrl, path.sep)) {
+		baseUrl += path.sep
+	}
+	meta.config.baseUrl = baseUrl
+
+	var AMDConfig = getAMDConfiguration(o)
+
+	// if config object defines baseUrl, it maybe different from "page root"
+	// or "foler where main.js is located"
+	// If different from page root it would be deeper in folder like 'js/app'
+	// let's resolve it to full path and reattach.
+	if (AMDConfig && AMDConfig.baseUrl) {
+		AMDConfig.baseUrl = path.relative(
+			meta.config.root
+			, path.normalize( path.resolve(
+				meta.config.root, AMDConfig.baseUrl
+			) + path.sep )
+		)
+	}
+	if (AMDConfig) {
+		AMDConfig.root = meta.config.root
+		meta.config = AMDConfig
+	}
+
+	if (meta.config.baseUrl && !endsWith(meta.config.baseUrl, path.sep)) {
+		meta.config.baseUrl += path.sep
+	}
+
+	if (!meta.config.paths) {
+		meta.config.paths = {}
+	}
+
+	var mainmodule = new Module(mainmodulepath, meta)
 	mainmodule.asttree = o.asttree
 
 	if (!meta.main) {
@@ -780,12 +1020,20 @@ exports.InlineDependenciesCommandHandler = function(o){
 	}
 
 	if (!meta.modules) {
-		meta.modules = {
-			'require': new Module('require', meta)
-			, 'module': new Module('module', meta)
-			, 'exports': new Module('exports', meta)
-		}
+		meta.modules = {}
 	}
+
+	;['require', 'module', 'exports'].forEach(function(modulename){
+		meta.modules[modulename] = new Module(
+				path.join(
+					meta.config.root
+					, meta.config.baseUrl
+					, modulename
+				)
+				, meta
+			)
+	})
+
 	if (!meta.modules[mainmodule.name]) {
 		meta.modules[mainmodule.name] = mainmodule
 	}
@@ -811,7 +1059,8 @@ exports.InlineDependenciesCommandHandler = function(o){
 			// the rest of modules must have define calls, but some of them
 			// may be anonymous. We cannot allow this as once AST trees are
 			// concatenated into one file, anonymous defines make AMD loaders sad.
-			if (module.define && !getDefineName(module.define)) {
+			// We also do NOT name anonymous define in main module.
+			if (module !== meta.main && module.define && !getDefineName(module.define)) {
 				console.log(
 					"Naming previously anonymous define in '"+
 					module.path.fs.name+"' as '"+module_name+"'"
@@ -826,7 +1075,12 @@ exports.InlineDependenciesCommandHandler = function(o){
 
 			var refs = module.references ? module.references : []
 			refs.forEach(function(ref){
-				// console.log("ref: ", ref.element)
+				console.log(
+					"Changing reference "
+					, ref.element.node.value
+					, ' to '
+					, ref.module.name
+				)
 				ref.element.node.value = ref.module.name
 				ref.element.node.raw = '"' + ref.module.name + '"'
 			})

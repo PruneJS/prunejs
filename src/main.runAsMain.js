@@ -71,6 +71,7 @@ exports.runAsMain = function(){
 			, {
 				'target':target_file
 				, 'source':file_name
+				, 'options': command_line_optins
 				, 'version':20121201
 			}
 		)
