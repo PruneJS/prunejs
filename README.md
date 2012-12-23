@@ -2,9 +2,10 @@
 
 Prune.js is a JavaScript code optimizer, compressor, concatenator, source map generator with special focus on building AMD and CommonJS module trees into compact concatenated single-file packages.
 
-It auto-discovers the AMD modules tree and "compiles" your source JavaScript spread over multiple files and directories into one minified single-file "assembly" ready to be served with a matching source map file.
+Prune.js is a materialization of a particular belief: **build tools must read our minds and just do the right thing.**
 
-Prune.js is especially useful for turning a diverse tree of AMD modules (and CommonJS modules, and AMD plugin resources) into a single compressed file. (It turns various files, including those referred to through 'text!', 'js!', 'css!', 'cjs!' AMD plugins into in-line, named AMD modules.) Prune.js can deal with (detect and inline) dynamically-declared AMD modules.
+Prune.js is especially useful for turning a diverse tree of AMD modules (and CommonJS modules, and AMD plugin resources) into a single compressed file. 
+It auto-discovers the AMD modules tree and AMD loader configuration object (place where you set `paths` and `baseUrl` values). It turns various files, including those referred to through 'text!', 'js!', 'css!', (soon 'cjs!') AMD plugins into in-line, named AMD modules. Prune.js can deal with (detect and inline) dynamically-declared AMD resources.
 
 Prune.js is a bit like `r.js` in purpose but it is very different in philosophy. It is designed for highest possible ease of use and sniffs out from your source all the information it needs for a successful build. Build configuration file is **not** needed. Prune.js is not tied to and does not replace any particular AMD loader. Prune.js is more general-purpose. Instead it works within the confines of the common AMD API. Prune.js is like as if you had an intelligent `automake` for JavaScript.
 
@@ -27,7 +28,6 @@ Building large JavaScript applications is a pain. There are all-inclusive and co
 
 Prune.js is an attempt to unchain an average web developer from a particular toolkit, yet still provide top-notch, elastic, auto-forming, supporting application build infrastructure.
 
-Prune.js is a materialization of a particular belief: *build tools must read our minds and just do the right thing.*
 
 ### Build walk-through
 
@@ -87,6 +87,30 @@ Somewhere inside your index.html file you have a script tag that contains someth
 After not finding references to `AMDLoaderConfiguration` inside the main module, Prune.js will scan root folder's typical “index” files and will find your `index.html` It will look at all script tag contents and will extract any first object declaration that has a property named `AMDLoaderConfiguration`.
 
 All AMD references in main module and beyond will be filtered through `paths` and the root of the AMD namespace will be adjusted to stated `baseUrl`
+
+Prune.js will handle (detect and inline) dynamically-used resources if you provide hints to Prune.js what possible modules this dynamic resource may be.
+
+	// our optimizer actually finds unused code paths
+	// like these and removes them before minification.
+	// But, before that, Prune.js's AMD tree resolution tree
+	// will see these modules and will inline them.
+	if (false) {
+		var we_may_need_this
+		we_may_need_this = require('deep/deeper/dynamic')
+		we_may_need_this = require('alt/tree/dynamic')
+	}
+
+	var prefix1 = 'deep/deeper/'
+	var prefix2 = 'alt/tree/'
+	var resource = 'dynamic'
+
+	// this require will work as expected at run-time, but
+	// will still benefit from inlined modules
+	require(
+		[( flag ? prefix1 : prefix2 ) + resource ]
+		, function(dynamic){}
+	)
+
 
 ### Limitations
 
@@ -173,3 +197,4 @@ As long as you limit your use of **relative** AMD resources to the following pat
 			// )
 		}
 	)
+
